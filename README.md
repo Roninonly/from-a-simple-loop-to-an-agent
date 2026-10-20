@@ -1,191 +1,276 @@
-# 阶段 9 报告：极简聊天网页与会话历史显示
+# From a Simple Loop to an Agent
 
-存档日期：2026-10-20。
+从一个最小的对话循环开始，逐步构建具备工具调用、会话记忆、知识库检索、MCP、HTTP 接口和网页界面的 AI 智能体。
 
-## 1. 本阶段完成什么
+> Building an AI agent step by step—from a simple loop to a full-stack application with tools, memory, RAG, MCP, and Docker.
 
-V9 在 V8 的智能体服务基础上增加一个本地聊天网页，让用户直接输入问题、查看回答、切换会话，并从 SQLite 中读取旧消息显示到页面。终端、MCP、RAG、会话持久化、评估和 Docker 构建配置继续保留。
+这是一个循序渐进的学习项目，而不是直接使用封装好的完整应用。根目录保留当前版本，`versions/` 保存各阶段代码与说明，方便比较实现方式、复现和复习。
 
-这是现有智能体新增的使用入口，没有重新创建一套模型或工具逻辑。当前 FastAPI 标题和终端输出沿用 Agent V6，项目阶段号 V9 表示新增网页能力。
+## 版本历史说明
 
-本阶段按三个小步骤完成：先能展示页面，再接通发送，最后增加会话切换与历史读取。只有页面显示时，并不具备发送请求的功能；后续 JavaScript 才补齐这一过程。
+项目早期是在多个阶段完成后才统一纳入 Git。为便于按阶段比较代码，本仓库于 2026-10-20 依据 `versions/` 中已有的快照，重新整理了 V0～V9 的阶段提交；它们是事后重建的学习记录，提交时间不是各阶段最初开发的时间，也没有还原每一个开发小步骤。
 
-## 2. 相比 V8 的文件变化
+重建保留了当前业务源码和原有快照内容。查看某阶段的提交可以比较当时的根目录实现，查看 `versions/` 则可以直接阅读各阶段存档；历史阶段的依赖与运行方式应以对应说明为准。
 
-| 文件 | 变化与职责 |
+## 当前功能
+
+- **对话入口**：既可在终端聊天，也可通过网页或 HTTP 接口使用。
+- **工具调用**：模型选择工具与参数，由 LangGraph 执行工具并将结果交回模型，支持继续调用和生成最终回答。
+- **会话记忆**：通过 `session_id` 对应 LangGraph 的 `thread_id`，使用 SQLite 保存状态，支持重启后继续同一会话。
+- **RAG 检索**：读取本地 Markdown，切分、向量化、计算余弦相似度，将检索片段和来源提供给模型。
+- **MCP 接入**：自动发现本地 MCP Server 的工具，转换成 LangChain 工具，交给 ToolNode 管理。
+- **最小评估**：检查答案文字、成功工具调用和检索内容，生成通过率、耗时与 JSON 报告。
+- **容器运行**：使用 Docker 构建镜像，通过命名卷保存会话数据库与向量模型缓存。
+- **聊天网页**：支持发送问题、切换会话和重新加载历史消息。
+
+当前 MCP 工具包括：
+
+| 工具 | 功能 |
 | --- | --- |
-| `app/static/index.html` | 新增 HTML/CSS/JavaScript 网页，处理发送、显示、切换、历史加载及失败提示 |
-| `app/api.py` | 增加首页 GET / 和历史 GET /history，继续复用已有 POST /chat |
-| `app/agent_service.py` | 导入 AIMessage，新增 get_history()，过滤并返回可展示的会话文本 |
-| `app/schemas.py` | 新增 HistoryMessage、HistoryResponse，用于约束历史响应 |
-| `versions/README.md` | 根目录版本索引增加 V9 |
-| 根目录 `.gitignore` | 忽略 V9 独立运行生成的数据库、缓存和评估报告 |
-| 根目录复习报告 | 同步网页阶段知识点和实现进度 |
+| `get_current_time` | 查询 MCP Server 所在环境的日期、时间和时区 |
+| `calculator` | 两个数字的加、减、乘、除 |
+| `count_text_characters` | 按 Python `len()` 统计文本长度 |
 
-未新增 Python 或 JavaScript 第三方依赖；前端使用浏览器提供的功能。当前 Dockerfile 已复制整个 app 目录，构建时自然会包含 HTML，无需为了这个网页另加 COPY。
+知识库工具 `search_knowledge` 在智能体进程内执行，不经过 MCP。示例文档中的“青竹 Agent 学习营”、人物与规则均为教学虚构。
 
-## 3. 快照结构
+## 从 V0 到 V9
+
+| 阶段 | 核心实现 | 主要学习内容 |
+| --- | --- | --- |
+| [V0](versions/v0/) | 最小连续聊天程序 | 模型客户端、环境变量、消息角色、对话历史、异常处理 |
+| [V1](versions/v1/) | 手写工具调用循环 | 工具描述、JSON 参数、执行分发、多工具结果、循环上限 |
+| [V2](versions/v2/) | LangGraph 状态图 | State、节点、边、ToolNode、条件路由、消息合并 |
+| [V3](versions/v3/) | 可持久化会话记忆 | Checkpointer、`thread_id`、SQLite、会话切换与恢复 |
+| [V4](versions/v4/) | 本地中文 RAG | 文档切分、Embedding、向量存储、相似度检索、引用来源 |
+| [V5](versions/v5-auto/) | MCP 工具自动发现 | Server / Client、stdio、工具定义、StructuredTool、同步与异步入口 |
+| [V6](versions/v6/) | FastAPI 服务 | 请求与响应模型、生命周期、共享服务对象、HTTP 接口 |
+| [V7](versions/v7/) | 最小自动评估 | 题库、实际执行记录、分项检查、汇总指标、结果保存 |
+| [V8](versions/v8/) | Docker 打包与运行 | Dockerfile、构建上下文、镜像、容器、端口映射、数据卷 |
+| [V9](versions/v9/) | 极简聊天网页 | HTML / CSS / JavaScript、fetch、DOM 更新、历史加载 |
+
+另保留 [V3 内存版](versions/v3-memory/) 和 [V5 基础接入版](versions/v5/)，用于对比持久化前后、自动发现前后的区别。
+
+完整版本说明见 [版本索引](versions/README.md)；逐阶段知识点与复习问题见 [项目知识复习报告](项目知识复习报告_V0至当前.md)。
+
+## 当前调用流程
 
 ```text
-v9/
-├── README.md
-├── Dockerfile
-├── .dockerignore
-├── requirements.txt
-├── main.py
-├── rag.py
-├── mcp_client.py
-├── mcp_server.py
+浏览器网页 / 其他 HTTP 客户端
+    → Uvicorn 接收请求
+    → FastAPI 校验请求、匹配接口
+    → AgentService.ask(message, session_id)
+    → LangGraph 读取该 thread_id 的会话状态
+    → 模型节点生成回答或工具调用请求
+        ├─ 不需要工具：结束，返回回答
+        └─ 需要工具：ToolNode 执行
+            ├─ MCP 工具：Client → 本地 Server → 执行结果
+            └─ RAG 工具：本地向量检索 → 文档片段与来源
+            → 工具结果加入状态 → 再次调用模型
+    → SQLite Checkpointer 保存状态
+    → HTTP JSON 响应 → 前端更新聊天内容
+```
+
+图执行期间的检查点也会保存，并非只在最后保存一次。终端入口直接调用同一套 `AgentService`，不需要经过 HTTP。
+
+打开网页时，浏览器先请求 `GET /` 取得 HTML，再由页面脚本请求 `GET /history` 加载默认会话；读取历史不触发模型推理。
+
+## 项目结构
+
+```text
+.
+├── main.py                  # 终端入口
 ├── app/
-│   ├── __init__.py
-│   ├── agent_service.py
-│   ├── api.py
-│   ├── schemas.py
-│   └── static/index.html
-├── data/agent_notes.md
-└── eval/
-    ├── dataset.json
-    └── evaluator.py
+│   ├── agent_service.py      # 初始化资源、构建状态图、问答与历史读取
+│   ├── api.py                # FastAPI 生命周期与路由
+│   ├── schemas.py            # 请求、响应的数据结构
+│   └── static/index.html     # 原生 HTML / CSS / JavaScript 聊天网页
+├── mcp_client.py             # MCP 工具发现、转换与执行桥接
+├── mcp_server.py             # 本地工具定义与 stdio 服务
+├── rag.py                    # 文档读取、切分、向量化与检索
+├── data/agent_notes.md       # 虚构知识库资料
+├── eval/
+│   ├── dataset.json          # 最小评估题库
+│   └── evaluator.py          # 检查、真实评估与报告生成
+├── versions/                # 各阶段代码快照与报告
+├── requirements.txt         # Python 依赖
+├── .env.example             # 不含真实密钥的配置示例
+├── .gitignore               # 忽略密钥和本地运行数据
+├── .dockerignore            # 排除不应进入构建上下文的文件
+└── Dockerfile               # 镜像构建与容器启动配置
 ```
 
-本目录保存 15 个应用、构建配置和题库文件，加上本报告。不复制 .env、真实 API Key、聊天数据库、向量模型缓存、虚拟环境、字节码、评估运行结果或 Git 元数据。快照不是运行数据备份。
+运行后会生成 `data/memory.db`、SQLite 辅助文件和 `data/embedding_models/`，这些是本地数据，不随 Git 仓库分发。
 
-## 4. 浏览器打开页面时发生什么
+## 本地运行
 
-```text
-浏览器 GET /
-→ Uvicorn 接收，FastAPI 调用 homepage()
-→ FileResponse 返回 app/static/index.html
-→ 浏览器解析 HTML、应用 CSS、执行 script
-→ 脚本末尾调用 loadHistory()
-→ 浏览器 GET /history?session_id=default-session
-→ 后端读取默认会话历史并返回 JSON
-→ 前端逐条 addMessage()，把消息加入页面
+以下以 **Windows PowerShell、Python 3.12** 为例。需要可用的模型 API 配置；首次启动还需要联网下载向量模型。
+
+### 1. 获取代码并安装依赖
+
+```powershell
+git clone https://github.com/Roninonly/from-a-simple-loop-to-an-agent.git
+cd from-a-simple-loop-to-an-agent
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-这里是两个 HTTP 请求：第一个取得网页，第二个取得历史数据。自动显示历史的原因是脚本末尾显式调用了 loadHistory()，不是浏览器或 FastAPI 自动猜测要读数据库。
+依次下载仓库、进入目录、创建虚拟环境、向该虚拟环境安装依赖。这里直接指定虚拟环境的 Python，不需要先激活它；本机 `python` 应指向准备使用的 Python 3.12。
 
-双击本地 HTML 可以展示内容，但当前相对地址 /history 和 /chat 需要通过对应 HTTP 服务访问页面，才能指向正确后端。
+### 2. 配置模型
 
-## 5. 发送问题的调用关系
+将 `.env.example` 复制为本地 `.env`；已有配置时不要覆盖。PowerShell 中可以运行：
 
-```text
-点击发送或按回车
-→ submit 事件处理函数
-→ preventDefault() 阻止表单默认刷新
-→ input.value.trim() 取得问题
-→ fetch("/chat", {method: "POST", headers: ..., body: ...})
-→ 后端校验 ChatRequest
-→ 从 app.state.agent_service 取得服务对象
-→ service.ask(message, session_id)
-→ LangGraph 按会话运行模型和工具
-→ ChatResponse 返回 answer 和 session_id
-→ FastAPI 转为 JSON 响应，Uvicorn 发回
-→ response.json() 解析
-→ addMessage("assistant", data.answer)
-→ 创建段落、设置 textContent、appendChild 加入页面
+```powershell
+if (!(Test-Path .env)) { Copy-Item .env.example .env }
 ```
 
-fetch 是浏览器提供的请求函数；addMessage 是项目自己编写的显示函数。传给 fetch 的对象是请求配置，浏览器负责生成实际 HTTP 报文，不需要在 JavaScript 参数中手写请求头与请求体之间的空行。
+此命令仅在 `.env` 不存在时创建它。随后在编辑器中填写：
 
-前端 response 是 HTTP 响应对象，不是模型 SDK 返回的 response；两者名字相同但处于不同层次。答案收到后也不会自动出现在页面，必须执行 DOM 更新代码。
+| 配置项 | 含义 |
+| --- | --- |
+| `MODEL_NAME` | 服务商提供的、支持工具调用的模型名称 |
+| `API_KEY` | 该服务商的 API 密钥 |
+| `BASE_URL` | 对应的 OpenAI-compatible API 地址 |
 
-## 6. 会话与历史恢复
+项目通过兼容接口连接模型，不限定只能使用某一家服务商；不同模型对工具调用、参数格式的支持可能不同。
 
-默认会话为 default-session；网页中的 currentSessionId 记录当前选择，发送时作为 JSON 中的 session_id 交给后端，再由 AgentService 作为 thread_id 使用。
+**不要提交或分享真实 `.env`，也不要把密钥写进源码、截图或 README。**
 
-切换按钮先校验和修剪会话名，更新当前会话，清空未发送草稿并调用 loadHistory()。loadHistory() 使用 encodeURIComponent 编码查询参数，支持中文、空格、/ 等字符。
+### 3. 启动聊天网页
 
-历史接口：
-
-```http
-GET /history?session_id=web-a
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn app.api:app --host 127.0.0.1 --port 8001
 ```
 
-响应结构示意：
+此命令使用项目虚拟环境运行 Uvicorn，加载 `app/api.py` 中的 `app` 对象，只在本机的 8001 端口监听。看到 `Application startup complete` 后访问：
+
+- 聊天网页：<http://127.0.0.1:8001/>
+- 接口文档：<http://127.0.0.1:8001/docs>
+- HTTP 健康检查：<http://127.0.0.1:8001/health>
+
+首次启动会准备本地知识库、下载并缓存 `BAAI/bge-small-zh-v1.5` 中文向量模型，然后发现 MCP 工具、打开 SQLite。下载完成前请等待启动日志，不要反复创建新进程。
+
+终端需保持运行，`Ctrl+C` 停止。当前不需要额外启动 MCP Server，客户端会管理它的子进程。
+
+### 4. 其他学习入口
+
+以下命令分别运行终端聊天、独立 RAG 检索、MCP 工具发现，不需要全部同时启动：
+
+```powershell
+.\.venv\Scripts\python.exe main.py
+.\.venv\Scripts\python.exe rag.py
+.\.venv\Scripts\python.exe mcp_client.py
+```
+
+终端聊天中使用 `/session 会话名` 切换，输入 `exit` 退出。运行 MCP Client 的独立入口只展示发现的工具，不会自动执行它们。
+
+## 网页使用与接口
+
+网页默认会话是 `default-session`。输入新的会话 ID 并切换，可以开始另一段对话；切回原 ID 会读取原来的聊天历史。
+
+刷新页面会回到默认会话；当前选择尚未存入浏览器，因此查看其他会话时需要再次切换。页面只展示用户消息和最终文本回答，不展示系统提示、工具请求或工具结果。
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `GET` | `/` | 返回聊天 HTML 页面 |
+| `GET` | `/health` | 检查 HTTP 服务是否响应，不验证模型或工具可用性 |
+| `POST` | `/chat` | 按会话提交问题，返回 `answer` 与 `session_id` |
+| `GET` | `/history?session_id=demo` | 读取指定会话的可展示历史，不调用模型 |
+| `GET` | `/docs` | FastAPI 自动生成的交互式接口文档 |
+
+`POST /chat` 的请求体示例：
 
 ```json
 {
-  "session_id": "web-a",
-  "messages": [
-    {"role": "user", "content": "你好"},
-    {"role": "assistant", "content": "你好，有什么可以帮你？"}
-  ]
+  "message": "请调用计算器计算 123 乘以 123，并查询当前时间。",
+  "session_id": "demo"
 }
 ```
 
-get_history() 使用进程内锁，调用 agent_graph.get_state() 读取检查点；不调用 invoke、不产生模型推理或工具执行。只展示 HumanMessage 与不包含 tool_calls 的 AIMessage 文本，过滤系统提示、工具调用请求和 ToolMessage。
+可以在 `/docs` 中提交，不要通过浏览器地址栏直接打开 `/chat` 来发送问题：地址栏通常发送 GET，而问答接口需要 POST 和 JSON 请求体。
 
-新会话返回空 messages，页面给出开始提问的提示。当前历史一次性返回，暂未分页。接口与请求均禁用缓存，避免切回会话时读取过时的 HTTP 缓存。
+## 自动评估
 
-刷新页面会回到默认会话并加载它的历史；当前选择未保存到浏览器存储，但再次输入原会话 ID 可以恢复对应会话。页面显示与数据库记录是两件事，清空显示不会删除会话。
-
-## 7. 等待与错误处理
-
-- sending 标记问答请求进行中；loadingHistory 标记历史读取中；historyReady 表示已可继续问答。
-- updateControls() 统一控制输入、发送和切换按钮，防止请求期间重复发送或混入其他会话。
-- 问答失败时保留输入并显示提示，恢复按钮；手动重试仍会再次提交问题。
-- 历史加载失败时禁止发送，但允许点击切换按钮重试，同一会话也可重试。
-- 历史响应检查 session_id、消息列表与角色/文本格式，避免显示不匹配的结果。
-- 用户输入和回答通过 textContent 作为普通文本显示，不把其内容作为 HTML 执行；Markdown 也暂不渲染。
-- 接口异常在服务端记录日志，返回给客户端的是简要提示。
-
-## 8. 验证记录及范围
-
-用户已提供或明确反馈的结果：
-
-1. 根路径 GET / 返回 200，多次 POST /chat 返回 200。
-2. 网页提问过程中真实执行 MCP get_current_time，终端打印时间结果。
-3. 用户反馈网页会话切换测试成功。
-4. 加入历史功能后，用户反馈首次打开页面会自动显示历史，并学习了 GET / 后再 GET /history 的流程。
-
-代码开发期间的隔离检查：
-
-- 使用真实 FastAPI 路由配合模拟服务，检查页面请求与响应字段。
-- 使用模拟 DOM/fetch 检查空白拦截、重复提交、异常响应、网络失败、输入恢复、会话 ID 传递与切换保护。
-- 使用临时 SQLite 保存测试消息，关闭并重新打开后，检查会话隔离、消息过滤、新会话空列表、中文参数、422/500/503 和 no-store。
-- 检查首次历史加载、切换加载、响应会话不匹配拒绝、失败后同会话重试和加载期间发送保护。
-
-这些检查没有请求付费模型或改写日常 memory.db。用户对页面的反馈不等于受控浏览器的完整视觉测试；错误分支、窄屏排版、切换历史恢复与刷新后的具体显示仍可按下一节进一步验收。
-
-V8 的容器验收与 V7 四题成绩属于历史记录，不能当作 V9 镜像已经重新构建或容器内全套评估已通过的证据。本次存档不会启动容器、构建镜像、提交或推送 Git。
-
-## 9. 本地复现与验收
-
-下列命令是以后运行时的参考，不要求为了阅读报告重复启动。先确保目标端口没有被另一个服务占用。
-
-运行当前根目录版本，在项目根目录的已激活虚拟环境中使用：
+预览题库，不请求模型：
 
 ```powershell
-uvicorn app.api:app --port 8001
+.\.venv\Scripts\python.exe eval/evaluator.py
 ```
 
-uvicorn 是服务器入口，app.api:app 指模块和对象，--port 8001 指本机服务端口；默认监听 127.0.0.1。执行会初始化模型客户端、知识库、MCP 和数据库连接，初次准备可能下载向量模型。看到 Application startup complete 后访问 http://127.0.0.1:8001/，终端保持运行；Ctrl+C 停止服务。
-
-如果需要独立复现 V9 快照，以下命令在 D:\agent\自学agent 执行：
+执行真实智能体评估：
 
 ```powershell
-.\.venv\Scripts\python.exe -m uvicorn app.api:app --app-dir .\versions\v9 --env-file .\.env --host 127.0.0.1 --port 8002
+.\.venv\Scripts\python.exe eval/evaluator.py --run
 ```
 
-各参数的意义：指定项目 Python；-m 运行 Uvicorn 模块；--app-dir 优先导入 V9 快照代码；--env-file 把原项目配置加载到进程环境；--host 与 --port 选择本机 8002 地址。
+`--run` 会提交当前题库的 5 次用户消息，工具循环可能产生额外模型请求和费用。当前共 4 道题，覆盖普通回复、计算器、RAG 和同会话记忆。
 
-快照会使用 versions/v9/data/memory.db 与自己的模型缓存，不会显示根目录原有会话；首次问答会请求模型并可能产生费用。配置仅加载到环境，不复制密钥文件。打开 http://127.0.0.1:8002/ 访问快照网页。
+评估使用临时 SQLite 数据库，结束后清理，不修改日常会话数据库；模型缓存仍可在本地保留。结果保存到 `eval/results/`，包含任务成功率、答案文字条件通过率、必需工具检查通过率、目标资料命中率及平均每题耗时。
 
-建议验收顺序：
+这些指标只代表当前题库与检查条件，不代表通用准确率，也不等于完整的安全、并发或持久化测试。
 
-1. 新建 test-a 会话，说“记住本会话测试代号是纸船42”。
-2. 切到 test-b，确认页面没有 test-a 的消息，提问也不应凭 test-a 的记忆回答。
-3. 切回 test-a，确认旧的提问与回答重新显示，继续提问能延续上下文。
-4. 刷新后回到默认会话，再切 test-a，确认仍能加载历史。
-5. 停止再启动同一版本服务，重复读取 test-a，检查持久化；不要删除数据库。
+## Docker 运行
 
-读取历史只查存储，发送问题才会触发智能体。使用测试数据即可，测试代号不是用户身份。
+先安装并启动 Docker Engine；Windows 可使用 Docker Desktop 的 WSL2 后端。以下命令仍在项目根目录执行，并使用已经填写的本地 `.env`。
 
-## 10. 当前边界与后续
+### 构建镜像
 
-当前是本地教学用的极简网页：没有用户登录、权限校验、历史分页、会话列表、流式输出、Markdown 渲染或消息删除。thread_id 隔离数据不等于鉴权。
+```powershell
+docker build --progress=plain -t agent-study:v9 .
+```
 
-本机运行的新版代码已经含网页，旧的 agent-study:v8 镜像不会自动更新。后续若验证 Docker 网页版，需要从 V9 代码构建新标签并创建新容器，按需要接回原卷；镜像、容器和持久化数据仍需分别管理。
+`build` 按 Dockerfile 构建镜像，`--progress=plain` 显示文本日志，`-t` 指定名称和标签，最后的 `.` 是当前构建上下文。镜像包含代码与依赖，不包含本机 `.venv`、真实 `.env`、聊天数据库或向量模型缓存。
 
-本阶段不要求立即发布公网或加入 Nginx。先完成上述本地验收，再决定是否验证新版容器或增加其他功能。
+### 创建数据卷并运行
+
+```powershell
+docker volume create agent-study-v9-data
+docker run -d --name agent-study-v9-web --env-file .env --mount "type=volume,source=agent-study-v9-data,target=/app/data" -p 127.0.0.1:8002:8000 agent-study:v9
+```
+
+第一行创建或复用命名卷。第二行从镜像创建并启动容器：
+
+- `-d`：在后台运行。
+- `--name`：指定容器名称，同一 Docker 环境中不能重名。
+- `--env-file`：将本地配置作为环境变量传入，不把密钥打包进镜像。
+- `--mount`：将命名卷挂载到 `/app/data`，保留 SQLite 和模型缓存。
+- `-p 127.0.0.1:8002:8000`：将本机 8002 端口映射到容器 8000，只允许本机访问。
+- `agent-study:v9`：使用的镜像，不是要创建的容器名称。
+
+查看启动日志：
+
+```powershell
+docker logs --tail 30 agent-study-v9-web
+```
+
+此命令读取最后 30 行日志，不会重新启动容器。等待初始化完成后，打开 <http://127.0.0.1:8002/>。
+
+停止和再次启动同一容器，可分别使用：
+
+```powershell
+docker stop agent-study-v9-web
+docker start agent-study-v9-web
+```
+
+这两条命令停止或恢复已有容器，不会删除命名卷。不要为了再次启动而重复 `docker run`，否则同名容器会冲突。首次使用新卷仍需下载向量模型，之后同卷可复用缓存。
+
+源码修改后，需要重新构建镜像并创建使用新版镜像的容器；已有容器不会自动更新。已存在的数据卷也会覆盖镜像中的 `/app/data` 内容，因此更新知识文档时需单独考虑卷内文件，不要直接删除保存聊天记录的卷。
+
+## 实现边界与安全说明
+
+- **学习项目，不是生产就绪服务**：没有登录、鉴权、限流或用户权限；知道会话 ID 就可能读取其记录，`thread_id` 隔离不等于安全隔离，请勿直接暴露到公网。
+- **单进程设计**：服务内使用锁串行处理问答与历史读取；启动时保持一个工作进程，不把当前 SQLite 方案当作多实例并发方案。
+- **有网络与费用依赖**：大语言模型通过远程 API 调用；本地 RAG 不代表整个智能体离线运行，模型服务会接收提交的对话和相关工具结果。
+- **记忆不是训练模型**：SQLite 保存会话状态并在后续调用时提供上下文，不是修改模型权重；当前没有跨会话用户画像、历史摘要或上下文裁剪。
+- **RAG 是最小实现**：知识库启动时在内存重建，默认取相似度最高的 2 个片段，没有相似度拒答阈值、持久化向量数据库或重排模型。
+- **网页保持极简**：当前无流式输出、历史分页、会话列表、Markdown 渲染或消息删除；输出按普通文本展示。
+- **日志与数据需自行保护**：终端可能打印工具参数与检索片段，评估报告也包含执行内容，不应放入真实隐私资料。
+- **依赖可复现性仍可改进**：多数依赖未锁定版本，未来重新安装或构建可能受上游变更影响，历史快照不等于完整环境锁定。
+
+接口文档和终端部分文字仍沿用“Agent V6”，表示这些入口最初加入的阶段，不代表当前仓库缺少 V7～V9 的功能。GitHub 保存源码，Docker 镜像保存构建产物，数据卷保存运行数据，三者需要分别管理。
+
+## 后续方向
+
+可在这个结课版本上继续练习流式响应、登录鉴权、历史摘要、更丰富的 RAG 和自动化测试；这些是后续方向，不是当前已实现功能。
+
+本仓库的核心目标是理解每一步为什么存在、数据怎样流动，以及如何从一个小循环逐步构建完整应用。
