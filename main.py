@@ -1,10 +1,9 @@
-"""Agent V4：在带会话记忆的 LangGraph Agent 中加入知识库检索工具。
+"""Agent V5：在 Memory 与 RAG 基础上，通过 MCP 调用本地时间工具。
 
-SQLite 继续按 thread_id 保存会话；本地知识库检索结果通过工具消息交给模型。
+SQLite 会话与本地知识库保留；时间工具由 MCP Server 执行并返回结果。
 """
 
 import os
-from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Callable, TypedDict
 
@@ -18,11 +17,13 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 
+from mcp_client import get_current_time
 from rag import create_retriever_tool
 
 
 SYSTEM_PROMPT = (
     "你是一个乐于助人的 AI 助手。请使用简洁的中文回答。"
+    "询问当前日期或时间时，必须调用 get_current_time，不能根据历史时间推断。"
     "涉及青竹 Agent 学习营的信息或规则时，必须先调用 search_knowledge，"
     "根据本轮检索资料回答，并注明资料来源。"
     "如果资料没有提供答案，请明确说明知识库未提供，不要编造。"
@@ -70,11 +71,6 @@ def calculator(left: float, operator: str, right: float) -> float:
         return left / right
 
     raise ValueError(f"不支持的运算符：{operator}")
-
-
-def get_current_time() -> str:
-    """返回运行本程序的电脑当前日期、时间和时区。"""
-    return datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
 
 
 def create_langgraph_model(tools: list) -> Runnable:
@@ -134,7 +130,7 @@ def create_agent_graph(
 
 def main() -> None:
     """程序入口。"""
-    print("Agent V4 项目已初始化。")
+    print("Agent V5 项目已初始化。")
 
     if not load_config():
         return

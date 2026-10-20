@@ -1,156 +1,86 @@
-# 阶段 4 报告：Agent V4 — RAG Agent
+# 阶段 5 报告：Agent V5 — MCP 工具接入
 
-本快照在用户成功运行完整知识库问答流程后保存，便于以后与 V3 对照。
+本快照在用户于 2026-10-10 成功验证连续两次实时查询后保存。
 
-## 当前架构
+## 相比 V4 的完整改动
 
-准备阶段：本地 Markdown 文档 → 按章节切分 → 中文 Embedding → 内存知识库。
+- 新增 mcp_server.py：使用官方 MCP SDK 的 MCPServer，注册当前时间工具，以 stdio 方式提供服务。
+- 新增 mcp_client.py：配置本地 Server 子进程、连接、发现工具、调用时间工具并提取返回文本。
+- main.py 删除直接读取时间的本地函数和 datetime 导入，改为导入客户端的同名包装函数。
+- main.py 保留同一份三工具列表：计算器、MCP 时间工具、知识库检索工具。
+- main.py 更新 V5 标识及系统提示，要求时间问题实时调用工具，不使用历史时间推断。
+- requirements.txt 新增 mcp==2.3.0；没有新增专门的 LangChain MCP 适配包。
+- LangGraph 循环、SQLite 会话隔离及恢复、RAG 文档读取和检索逻辑保持不变。
 
-问答阶段：用户 → LangGraph 模型节点 → 判断是否调用工具 → ToolNode 执行
-search_knowledge → 返回相关原文和来源 → 工具消息加入状态 → 模型生成答案。
+## 核心函数与调用关系
 
-SQLite Checkpointer 继续按 thread_id 保存和恢复会话。
+mcp_server.py 中的 get_current_time 读取服务端电脑的真实日期、时间和时区。
+@server.tool() 将其注册为 MCP 工具；server.run(transport="stdio") 启动服务并等待请求。
 
-## 相比 V3 新增了什么
+mcp_client.py 中：
+- create_mcp_client：指定当前 Python 解释器和同目录下服务端文件的绝对路径，构造客户端；此时尚未启动服务。
+- call_time_tool：通过已连接客户端请求 get_current_time，并将返回的文本块拼成字符串。
+- get_current_time：给同步 ToolNode 使用的包装函数，调用 asyncio.run 执行内部异步请求，打印日志并返回结果。
+- 内层 request_time：在 async with 中建立连接、调用工具，离开上下文时清理连接和服务端子进程。
+- main：独立通信测试，连接后列出工具、调用一次时间工具并关闭。
 
-- 新增 rag.py，将文档读取、切分、向量化和检索放在独立模块中。
-- 使用 fastembed 加载 BAAI/bge-small-zh-v1.5，在本机 CPU 上生成 512 维向量。
-- 文档按 Markdown 二级标题切成 5 个片段；每条记录包含 text、vector、source。
-- 使用 NumPy 计算问题向量与片段向量的余弦相似度，按分数返回 Top-K。
-- 默认 top_k=2，表示最多返回前两条片段，不是工具调用次数。
-- create_retriever_tool 在启动时建立知识库，再返回 search_knowledge 函数。
-- 内层工具通过闭包复用已准备的模型和知识库，工具参数只有 query。
-- 模型和 ToolNode 使用同一份工具列表：计算器、当前时间、知识库检索。
-- 更新系统提示，要求学习营问题查资料、注明来源、资料不足时说明未知。
-- 已有会话按系统消息的原 ID 更新提示，不删除用户或助手的历史。
+完整一次问答中，模型先请求时间工具，ToolNode 执行客户端包装函数，
+客户端通过 MCP 向独立 Server 进程发出请求，Server 读取时间并返回。
+客户端将文本交回 ToolNode，ToolNode 生成工具消息加入状态，模型再生成最终回答。
+无需用户单独打开服务端终端；目前每次调用都会启动并关闭一个 Server 子进程。
 
-## 核心函数
+内层 request_time 没有捕获外层局部变量，因此也可以移到模块顶层。
+保留嵌套是为了将这段专用异步连接逻辑放在同步包装函数附近，不是语法强制要求。
 
-- load_knowledge_text：读取本地文档，返回全文字符串。
-- split_knowledge_text：按二级标题切分，返回片段字符串列表。
-- create_embedding_model：加载本地向量模型，指定 CPU 和缓存目录。
-- embed_knowledge_chunks：把每个片段转换成向量，输出顺序与原文一致。
-- create_knowledge_store：把原文、向量、来源配对成内存记录。
-- cosine_similarity：比较两个向量的方向接近程度，零向量返回 0。
-- retrieve_knowledge：问题向量化、逐条打分、排序、返回前 top_k 条。
-- create_retriever_tool / search_knowledge：准备资源并提供模型可请求的检索工具。
+## 已验证
 
-## 当前最小目录
+- 用户第一次查询：2026-10-10 10:02:21 中国标准时间。
+- 用户第二次查询：2026-10-10 10:05:18 中国标准时间。
+- 两次均出现 MCP 调用日志，最终回答与工具结果一致。
+- 输入 exit 正常结束对话。
+- 归档时校验快照内容与根目录对应文件一致，并检查 Python 语法和快照内 MCP 通信。
 
-```text
-自学agent/
-├── main.py
-├── rag.py
-├── requirements.txt
-├── .env                 # 本机配置，不复制到快照
-├── .env.example
-├── .gitignore
-├── data/
-│   ├── agent_notes.md
-│   ├── memory.db         # 运行生成，包含会话历史
-│   └── embedding_models/ # 下载的模型文件，不是文档向量
-└── versions/
-    └── v4/
-        ├── main.py
-        ├── rag.py
-        ├── requirements.txt
-        ├── README.md
-        └── data/agent_notes.md
-```
+## 快照文件及运行方式
 
-快照不包含 .env、会话数据库、模型缓存或虚拟环境。
-独立运行快照时，会在 versions/v4/data 下创建自己的数据库和模型缓存。
-因此根目录与快照不是同一份会话历史；快照首次启动可能需要重新下载模型。
-内存知识库在每次启动时重新生成，运行中不自动重读修改后的文档。
+包含 main.py、rag.py、mcp_client.py、mcp_server.py、requirements.txt、
+data/agent_notes.md 以及本报告。
 
-## 安装与配置
+不包含 .env、虚拟环境、真实会话数据库、模型缓存或 Python 字节码。
+沿用项目根目录 .env；数据库及向量模型缓存按快照文件位置创建，
+位于 versions/v5/data，与根目录运行数据分开。首次运行 RAG 快照可能需要下载模型。
 
-在项目根目录使用现有虚拟环境安装快照依赖：
+在项目根目录使用已有虚拟环境运行：
 
 ```powershell
-uv pip install --python .\.venv\Scripts\python.exe -r .\versions\v4\requirements.txt
+.\.venv\Scripts\python.exe .\versions\v5\main.py
 ```
 
-本机 uv 位于 C:\Users\滕滕滕\.local\bin\uv.exe；如果 uv 不在 PATH，可使用该完整路径执行。
-已经完成安装的当前环境不必重复安装。
-
-继续使用项目根目录的 .env：
-
-```dotenv
-MODEL_NAME=你的聊天模型名称
-API_KEY=你的聊天模型密钥
-BASE_URL=你的聊天接口地址
-```
-
-本地向量模型不需要新增 Embedding API Key，不要提交真实 .env。
-首次下载模型需要联网；聊天模型调用也需要能访问已配置的接口。
-实际验收使用 Python 3.12.14、fastembed 0.9.0；依赖清单沿用项目未固定版本的写法。
-
-## 启动与测试
-
-以下命令都在项目根目录执行；未激活虚拟环境时使用明确的解释器路径。
-
-当前版本：
+只检查快照内 MCP 通信，不启动聊天模型或加载 RAG：
 
 ```powershell
-.\.venv\Scripts\python.exe .\main.py
+.\.venv\Scripts\python.exe .\versions\v5\mcp_client.py
 ```
 
-V4 历史快照：
+现有环境已经安装依赖，不必重复安装。以后重建环境时先确认安装操作，
+再使用该快照的 requirements.txt。除 MCP 已固定版本外，其余依赖沿用原清单；
+这不是完整的依赖锁定文件，未来安装未必与当前环境完全一致。
 
-```powershell
-.\.venv\Scripts\python.exe .\versions\v4\main.py
-```
+## 当前边界与容易混淆的地方
 
-独立检索测试：
+- 这是 MCP 工具服务，不是新建了第二个智能体；Server 内部没有聊天模型。
+- 当前只有时间工具走 MCP；计算器与 RAG 仍在 Agent 进程中执行。
+- Client 的 call_time_tool 明确写了时间工具名；list_tools 只用于独立测试展示。
+- 新增 Server 工具不会自动注册到 Agent，尚未实现通用工具发现与适配。
+- stdio 是本机进程通信方式，不是已经部署的远程 HTTP 服务。
+- 同步包装函数使用 asyncio.run，不能直接放进同一线程已运行的异步事件循环；
+  以后进入异步 Web 服务时，需要重新选择同步或异步调用方式。
+- Server 标准输出用于协议通信，不应加入普通 print 提示；本项目日志放在客户端。
+- 时区来自运行 Server 的电脑设置，程序没有硬编码中国标准时间。
+- wxit 是普通用户文本，不是退出命令；目前只匹配精确的 exit。
+- 模型关于“以后不会记得”的说法不能代替实际存储行为：SQLite 保留同一会话历史，
+  不同 thread_id 的历史相互隔离，不会自动跨会话共享。
+- 尚未实现 FastAPI、正式评估测试集或 Docker 部署。
+- 下一阶段是 V6 FastAPI，等待用户明确要求继续下一阶段。
 
-```powershell
-.\.venv\Scripts\python.exe .\versions\v4\rag.py
-```
-
-最简单的完整测试问题：
-
-```text
-一个学员可以借用8台吗？请查询学习营资料并注明来源。
-```
-
-预期先看到“知识库检索问题”以及设备借用片段，然后模型回答一次最多借 1 台，
-并注明 data/agent_notes.md。检索词可能由模型改写，检索次数和答案措辞不固定。
-输入 exit 结束；/session 会话名切换仍与 V3 相同。
-
-## 验证结果
-
-- 真实中文向量模型成功产生 5 个向量，每个 512 维，数值有效。
-- 文本与向量配对、空输入、数量不一致保护测试通过。
-- 余弦相似度、Top-K、空问题及无效 top_k 测试通过。
-- 答疑时间、作业截止、设备借用、阶段验收四类问题均首条命中目标片段。
-- 临时 SQLite 数据库中的工具循环、旧提示更新、历史恢复和会话隔离通过。
-- 真实聊天模型调用检索工具、收到 ToolMessage、引用来源回答通过。
-- 真实聊天模型调用计算器计算 123*123=15129 通过。
-- 用户成功测试设备申请联系人：检索命中林舟，最终回答并注明资料来源。
-- 自动化集成验收使用临时数据库，未把测试对话写进用户的真实数据库。
-
-## 常见问题与边界
-
-- import 报错：优先检查是否使用项目 .venv，而不是系统 Python。
-- 找不到文档：确认所运行 rag.py 同级的 data/agent_notes.md 存在。
-- 首次加载停留较久：看下载日志；缓存未准备好时不能跳过模型下载。
-- Windows 符号链接警告或匿名下载警告不一定意味着失败，以最终结果为准。
-- 模型调用失败：检查网络、接口配置和返回错误；不要公开密钥。
-- 检索不相关：Top-K 只表示相对排名，目前没有最低分数过滤，也不保证片段有答案。
-- 相似度不是概率或正确率，512 个向量数字也不适合逐个解释成具体词义。
-- 多次“知识库检索问题”可能是模型请求多次工具调用，不是重新建立知识库。
-- RAG 资料默认对所有会话共享；thread_id 隔离的是聊天记录，不是知识库权限。
-- SQLite 保存会话历史；文档向量仍在内存中，关闭后丢失，下次启动重新建立。
-- 失败可能留下中间检查点，尚未实现完善的重试和会话修复。
-- 文档及学习营规则为教学虚构，不代表真实人物、机构或借用政策。
-
-## 当前还不具备
-
-- 持久化向量索引、大规模检索或复杂 PDF 处理。
-- 分数阈值、重排序、严格的答案验证或完善的知识库权限隔离。
-- 跨会话用户画像、历史摘要和消息裁剪。
-- MCP、FastAPI、正式 Evaluation 测试集或 Docker 部署。
-
-下一阶段是阶段 5 MCP：把现有工具的执行扩展为通过 MCP Client 调用本地 MCP Server。
-当前快照不包含阶段 5 代码，等待用户明确要求继续下一阶段。
+本阶段把时间工具从 Agent 进程内的普通函数，扩展为由 MCP Client 请求独立
+MCP Server 执行，为以后复用工具服务做准备；目前还不是全自动的通用 MCP 接入。
