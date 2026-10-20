@@ -1,0 +1,11 @@
+# OpenAI-compatible 模型客户端；本项目可用它调用 DeepSeek API。
+openai
+
+# 读取本机 .env 中的模型配置。
+python-dotenv
+
+# 阶段 2：用 LangGraph 把手写 Agent Loop 改造成状态图。
+langgraph
+
+# 让 LangGraph 通过统一的聊天模型接口连接 OpenAI-compatible 服务。
+langchain-openai
