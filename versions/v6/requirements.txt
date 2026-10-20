@@ -1,0 +1,29 @@
+# OpenAI-compatible 模型客户端；本项目可用它调用 DeepSeek API。
+openai
+
+# 读取本机 .env 中的模型配置。
+python-dotenv
+
+# 阶段 2：用 LangGraph 把手写 Agent Loop 改造成状态图。
+langgraph
+
+# 让 LangGraph 通过统一的聊天模型接口连接 OpenAI-compatible 服务。
+langchain-openai
+
+# 阶段 3：将 LangGraph 会话状态保存到本地 SQLite 数据库。
+langgraph-checkpoint-sqlite
+
+# 阶段 4：在本地运行文本向量模型，为知识库检索生成 Embedding。
+fastembed
+
+# 计算向量相似度；此前已随 fastembed 安装，这里明确记录直接依赖。
+numpy
+
+# 阶段 5：官方 MCP SDK，用于编写本地工具服务端与客户端。
+mcp==2.3.0
+
+# 阶段 6：提供 HTTP 接口，让前端或其他程序调用现有 Agent。
+fastapi
+
+# 启动 FastAPI 服务；虽然已随其他依赖安装，仍明确记录本项目直接使用。
+uvicorn
