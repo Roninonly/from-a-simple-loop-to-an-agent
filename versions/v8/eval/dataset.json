@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "description": "Agent V7 的最小评估题库。每题使用独立的新会话，题内问题按顺序提交；答案条件检查最后一次回复，工具及检索条件检查本题实际执行记录。",
+  "cases": [
+    {
+      "id": "chat_exact_reply",
+      "category": "chat",
+      "description": "检查普通文本回复是否遵守明确要求，不代表通用知识问答能力。",
+      "questions": [
+        "只回复两个汉字：青竹。不要添加任何其他内容。"
+      ],
+      "expected": {
+        "answer_equals": "青竹"
+      }
+    },
+    {
+      "id": "tool_calculator",
+      "category": "tool",
+      "description": "同时检查计算结果和计算器的真实调用，不能把模型自行计算当作工具成功。",
+      "questions": [
+        "请调用 calculator 工具计算 123 乘以 123。最终结果用不带千位逗号的阿拉伯数字表示。"
+      ],
+      "expected": {
+        "answer_contains": ["15129"],
+        "required_tools": ["calculator"]
+      }
+    },
+    {
+      "id": "rag_device_contact",
+      "category": "rag",
+      "description": "检查知识库工具调用、检索片段命中，以及回答是否包含正确助教和资料来源。",
+      "questions": [
+        "根据青竹 Agent 学习营的设备借用规则，设备申请应联系哪位助教？请注明资料来源的文件路径。"
+      ],
+      "expected": {
+        "answer_contains": ["林舟", "data/agent_notes.md"],
+        "required_tools": ["search_knowledge"],
+        "retrieved_contains": ["设备申请需要联系助教林舟"]
+      }
+    },
+    {
+      "id": "memory_remember_name",
+      "category": "memory",
+      "description": "在同一新会话中先告知名字，再追问，检查最后一次回复是否恢复了会话信息。",
+      "questions": [
+        "请记住：我的名字是小红。",
+        "我的名字是什么？只回答名字。"
+      ],
+      "expected": {
+        "answer_contains": ["小红"]
+      }
+    }
+  ]
+}

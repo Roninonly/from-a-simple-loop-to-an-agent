@@ -1,0 +1,20 @@
+# 排除任意层级的真实环境配置，只保留不含密钥的示例模板。
+**/.env
+**/.env.*
+!**/.env.example
+
+# Windows 虚拟环境不能直接作为容器里的 Python 环境，依赖稍后重新安装。
+.venv/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+
+# 日常对话、模型下载缓存和评估运行记录不随镜像分发。
+data/*.db*
+data/embedding_models/
+eval/results/
+
+# 只打包正在开发的版本，不带历史快照或开发工具配置。
+versions/
+.git/
+.vscode/
