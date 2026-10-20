@@ -1,0 +1,5 @@
+# OpenAI-compatible 模型客户端；本项目可用它调用 DeepSeek API。
+openai
+
+# 读取本机 .env 中的模型配置。
+python-dotenv

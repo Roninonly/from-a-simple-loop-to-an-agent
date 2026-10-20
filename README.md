@@ -1,21 +1,27 @@
-# Agent V0：LLM Chat Agent
+# Agent V1：Tool-Using Agent
 
-这个版本不使用 Agent 框架，也没有工具调用。
+这个版本在 V0 基础上加入了结构化 Tool Calling，并继续使用手写 Agent Loop。
 
 它已经具备：
 
-- 从 `.env` 加载模型配置。
-- 在终端连续接收用户输入。
-- 使用 `messages` 保存本次程序运行期间的对话历史。
-- 调用 OpenAI-compatible 模型并显示回答。
-- 输入 `exit` 结束对话。
-- 捕获并显示模型调用错误。
+- `calculator` 计算工具。
+- `get_current_time` 本机时间工具。
+- 模型自主选择工具。
+- 同一回复中的多个工具调用。
+- 工具结果与 `tool_call_id` 对应。
+- 根据工具结果继续请求模型。
+- 每个用户问题最多请求模型 5 次。
+- 工具错误回传和最终自然语言回答。
 
 在项目根目录运行：
 
 ```powershell
-pip install -r .\versions\v0\requirements.txt
-python .\versions\v0\main.py
+pip install -r .\versions\v1\requirements.txt
+python .\versions\v1\main.py
 ```
 
-简单测试：连续询问两条有关联的问题，观察模型能否根据 `messages` 理解上下文。
+简单测试：
+
+```text
+请计算 123×123，并告诉我现在几点。
+```
