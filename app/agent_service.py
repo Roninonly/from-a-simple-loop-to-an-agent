@@ -8,7 +8,7 @@ from threading import Lock
 from typing import Annotated, Callable, Iterator, TypedDict
 
 from dotenv import load_dotenv
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import Runnable
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -113,6 +113,27 @@ class AgentService:
         self.database_path = database_path
         # 单进程教学版先串行处理问答，保护读历史、运行图的完整过程。
         self._lock = Lock()
+
+    def get_history(self, session_id: str) -> list[dict[str, str]]:
+        """读取会话中的用户消息与最终文本回答，不执行图或调用模型。"""
+        if not session_id.strip():
+            raise ValueError("会话 ID 不能只包含空白字符。")
+
+        graph_config = {"configurable": {"thread_id": session_id}}
+        with self._lock:
+            saved_state = self.agent_graph.get_state(graph_config)
+            history = []
+            for message in saved_state.values.get("messages", []):
+                if isinstance(message, HumanMessage):
+                    role = "user"
+                elif isinstance(message, AIMessage) and not message.tool_calls:
+                    role = "assistant"
+                else:
+                    # 系统提示、工具调用请求和工具结果不作为聊天气泡展示。
+                    continue
+                if isinstance(message.content, str) and message.content:
+                    history.append({"role": role, "content": message.content})
+            return history
 
     def ask(self, message: str, session_id: str) -> str:
         """按会话读取历史、提交本轮问题，并返回最终文本回答。"""

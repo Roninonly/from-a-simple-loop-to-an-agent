@@ -1,5 +1,7 @@
 """聊天接口的输入、输出格式；这里的数据模型不是大语言模型。"""
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -23,3 +25,17 @@ class ChatResponse(BaseModel):
 
     answer: str
     session_id: str
+
+
+class HistoryMessage(BaseModel):
+    """供网页显示的一条历史消息，不包含系统提示或工具内部消息。"""
+
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class HistoryResponse(BaseModel):
+    """指定会话按原顺序排列的文本聊天历史。"""
+
+    session_id: str
+    messages: list[HistoryMessage]

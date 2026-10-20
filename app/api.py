@@ -2,12 +2,14 @@
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.concurrency import contextmanager_in_threadpool
+from fastapi.responses import FileResponse
 
 from app.agent_service import create_agent_service
-from app.schemas import ChatRequest, ChatResponse
+from app.schemas import ChatRequest, ChatResponse, HistoryResponse
 
 
 logger = logging.getLogger(__name__)
@@ -26,12 +28,41 @@ async def lifespan(application: FastAPI):
 
 
 app = FastAPI(title="Agent V6 API", lifespan=lifespan)
+FRONTEND_PATH = Path(__file__).resolve().parent / "static" / "index.html"
+
+
+@app.get("/", include_in_schema=False)
+def homepage() -> FileResponse:
+    """返回聊天页面，由浏览器中的脚本向 /chat 提交问题。"""
+    return FileResponse(FRONTEND_PATH)
 
 
 @app.get("/health")
 def health() -> dict[str, str]:
     """仅检查 HTTP 服务是否能响应，不检查模型、知识库或 MCP。"""
     return {"status": "ok"}
+
+
+@app.get("/history", response_model=HistoryResponse)
+def history(
+    http_request: Request,
+    response: Response,
+    session_id: str = Query(default="default-session", min_length=1, pattern=r"\S"),
+) -> HistoryResponse:
+    """按查询参数读取历史；新会话返回空列表，不触发模型问答。"""
+    service = getattr(http_request.app.state, "agent_service", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="智能体服务尚未就绪。")
+    try:
+        messages = service.get_history(session_id)
+    except Exception:
+        logger.exception("读取会话历史失败。")
+        raise HTTPException(
+            status_code=500, detail="读取会话历史失败，请查看服务终端日志。"
+        ) from None
+
+    response.headers["Cache-Control"] = "no-store"
+    return HistoryResponse(session_id=session_id, messages=messages)
 
 
 @app.post("/chat", response_model=ChatResponse)

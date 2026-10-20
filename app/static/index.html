@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>我的 Agent 学习项目</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, "Microsoft YaHei", sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: #f3f6fb; color: #203047; }
+    main { width: min(760px, calc(100% - 32px)); margin: 48px auto; }
+    h1 { margin: 0 0 8px; font-size: 1.7rem; }
+    p { line-height: 1.6; }
+    .card { height: 360px; overflow-y: auto; margin-top: 24px; padding: 24px; background: #fff; border: 1px solid #dce4ef; border-radius: 16px; box-shadow: 0 8px 24px #2030470a; }
+    .notice { margin: 0; color: #52647d; }
+    .message { margin: 16px 0; padding: 12px 14px; border-radius: 10px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
+    .user { background: #eaf0ff; }
+    .assistant { background: #f3f6fb; }
+    .error { color: #a32626; background: #fff0f0; }
+    #status { min-height: 24px; color: #52647d; }
+    form { display: flex; gap: 12px; margin-top: 20px; }
+    input { flex: 1; min-width: 0; padding: 12px 14px; border: 1px solid #c8d4e3; border-radius: 10px; font: inherit; }
+    button { padding: 12px 22px; border: 0; border-radius: 10px; background: #3158ba; color: #fff; font: inherit; cursor: pointer; }
+    button:disabled { background: #bdc8d7; color: #34465d; cursor: wait; }
+    input:focus-visible, button:focus-visible { outline: 3px solid #91adf1; outline-offset: 2px; }
+    @media (max-width: 520px) { main { margin: 24px auto; } form { flex-direction: column; } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>我的 Agent 学习项目</h1>
+    <p>当前会话：<strong id="current-session">default-session</strong>。</p>
+    <form id="session-form" aria-label="切换会话">
+      <input id="session-input" type="text" aria-label="会话名" value="default-session" required>
+      <button id="session-button" type="submit">切换会话</button>
+    </form>
+    <p class="notice">切换会话会加载已保存的对话。刷新后回到默认会话并加载其历史。</p>
+    <section id="messages" class="card" role="log" aria-label="对话记录" aria-live="polite">
+      <p class="notice">输入一个问题，开始对话。</p>
+    </section>
+    <form id="chat-form" aria-label="发送消息">
+      <input id="message-input" type="text" aria-label="消息内容" placeholder="输入问题，按回车或点击发送" required>
+      <button id="send-button" type="submit">发送</button>
+    </form>
+    <p id="status" role="status"></p>
+  </main>
+  <script>
+    // 浏览器提供 document；按元素 ID 找到页面上要读取或更新的部分。
+    const form = document.getElementById("chat-form");
+    const input = document.getElementById("message-input");
+    const button = document.getElementById("send-button");
+    const messages = document.getElementById("messages");
+    const status = document.getElementById("status");
+    const sessionForm = document.getElementById("session-form");
+    const sessionInput = document.getElementById("session-input");
+    const sessionButton = document.getElementById("session-button");
+    const sessionLabel = document.getElementById("current-session");
+    let currentSessionId = "default-session";
+    let sending = false;
+    let loadingHistory = false;
+    let historyReady = false;
+
+    function updateControls() {
+      input.disabled = sending || loadingHistory || !historyReady;
+      button.disabled = sending || loadingHistory || !historyReady;
+      sessionInput.disabled = sending || loadingHistory;
+      sessionButton.disabled = sending || loadingHistory;
+    }
+
+    function addMessage(role, text) {
+      const paragraph = document.createElement("p");
+      paragraph.className = "message " + role;
+      // 按普通文本显示，避免把用户输入或模型返回当成 HTML 执行。
+      const label = role === "user" ? "我：" : role === "assistant" ? "Agent：" : "提示：";
+      paragraph.textContent = label + text;
+      messages.appendChild(paragraph);
+      messages.scrollTop = messages.scrollHeight;
+    }
+
+    async function loadHistory() {
+      loadingHistory = true;
+      historyReady = false;
+      updateControls();
+      messages.replaceChildren();
+      status.textContent = "正在加载会话历史…";
+      try {
+        // 查询参数编码可保留中文、空格及 / 等会话名字符。
+        const response = await fetch("/history?session_id=" + encodeURIComponent(currentSessionId), {
+          cache: "no-store",
+        });
+        if (!response.ok) throw new Error("读取历史失败（HTTP " + response.status + "）。");
+        const data = await response.json();
+        if (!data || data.session_id !== currentSessionId || !Array.isArray(data.messages) ||
+            data.messages.some(item => !item || !["user", "assistant"].includes(item.role) || typeof item.content !== "string")) {
+          throw new Error("后端返回的历史格式不正确。");
+        }
+        for (const item of data.messages) addMessage(item.role, item.content);
+        if (!data.messages.length) addMessage("notice", "这个会话还没有对话，可以开始提问。");
+        historyReady = true;
+        status.textContent = "会话历史已加载，可以继续提问。";
+      } catch (error) {
+        addMessage("error", error instanceof TypeError ? "无法连接后端，请检查服务是否仍在运行。" : error.message);
+        status.textContent = "历史加载失败，请点击切换会话重试。";
+      } finally {
+        loadingHistory = false;
+        updateControls();
+        if (historyReady) input.focus();
+      }
+    }
+
+    // 切换后读取对应会话的历史；不会删除记录或调用模型。
+    sessionForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (sending || loadingHistory) return;
+      const nextSessionId = sessionInput.value.trim();
+      if (!nextSessionId) {
+        status.textContent = "请输入非空的会话名。";
+        return;
+      }
+      sessionInput.value = nextSessionId;
+      if (nextSessionId !== currentSessionId) input.value = "";
+      currentSessionId = nextSessionId;
+      sessionLabel.textContent = currentSessionId;
+      loadHistory();
+    });
+
+    // 点击发送或按回车都会提交表单，由这个函数处理。
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault(); // 阻止浏览器默认刷新页面提交表单。
+      const message = input.value.trim();
+      if (sending || loadingHistory || !historyReady || !message) return;
+
+      sending = true;
+      updateControls();
+      button.textContent = "等待中…";
+      status.textContent = "正在等待智能体回答…";
+      addMessage("user", message);
+
+      try {
+        // fetch 是浏览器提供的请求函数；相对地址请求提供本页面的后端。
+        const response = await fetch("/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: message, session_id: currentSessionId }),
+        });
+        if (!response.ok) {
+          throw new Error("请求失败（HTTP " + response.status + "），请检查服务终端日志。");
+        }
+        const data = await response.json();
+        if (typeof data.answer !== "string") {
+          throw new Error("后端没有返回可显示的回答。");
+        }
+        addMessage("assistant", data.answer);
+        input.value = "";
+        status.textContent = "回答已收到，可以继续提问。";
+      } catch (error) {
+        addMessage("error", error instanceof TypeError ? "无法连接后端，请检查服务是否仍在运行。" : error.message);
+        status.textContent = "本次请求未完成，输入已保留；重试会再次提交问题。";
+      } finally {
+        sending = false;
+        updateControls();
+        button.textContent = "发送";
+        input.focus();
+      }
+    });
+
+    // 首次打开或刷新页面时，也从后端读取默认会话的历史。
+    loadHistory();
+  </script>
+</body>
+</html>
