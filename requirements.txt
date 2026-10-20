@@ -9,3 +9,6 @@ langgraph
 
 # 让 LangGraph 通过统一的聊天模型接口连接 OpenAI-compatible 服务。
 langchain-openai
+
+# 阶段 3：将 LangGraph 会话状态保存到本地 SQLite 数据库。
+langgraph-checkpoint-sqlite

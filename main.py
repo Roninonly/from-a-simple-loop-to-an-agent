@@ -1,18 +1,20 @@
 """Agent V3：在 LangGraph Agent 中加入会话记忆。
 
-本阶段使用 Checkpointer 按 thread_id 保存和恢复图状态，
-让对话历史不再由 main 函数手动传递。
+本阶段使用 SQLite Checkpointer 按 thread_id 保存和恢复图状态，
+让会话历史在程序关闭后仍然保留。
 """
 
 import os
 from datetime import datetime
+from pathlib import Path
 from typing import Annotated, Callable, TypedDict
 
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import Runnable
 from langchain_openai import ChatOpenAI
-from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
@@ -101,7 +103,7 @@ def route_after_agent(state: AgentState) -> str:
     return END
 
 
-def create_agent_graph(model: Runnable, checkpointer: InMemorySaver) -> Runnable:
+def create_agent_graph(model: Runnable, checkpointer: BaseCheckpointSaver) -> Runnable:
     """创建并编译模型节点与工具节点组成的状态图。"""
     graph = StateGraph(AgentState)
 
@@ -127,68 +129,74 @@ def main() -> None:
         return
 
     model = create_langgraph_model()
-    checkpointer = InMemorySaver()
-    agent_graph = create_agent_graph(model, checkpointer)
-    current_session_id = "default-session"
-    graph_config = {
-        "configurable": {"thread_id": current_session_id},
-        "recursion_limit": 10,
-    }
+    data_dir = Path(__file__).resolve().parent / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    database_path = data_dir / "memory.db"
 
-    print("模型连接配置已加载。")
-    print("带内存 Checkpointer 的状态图已创建。")
-    print(f"当前会话：{current_session_id}")
-    print("输入 /session 会话名 切换会话。")
-    print("输入 exit 结束对话。")
+    # 保持数据库连接打开，直到终端对话循环结束。
+    with SqliteSaver.from_conn_string(str(database_path)) as checkpointer:
+        agent_graph = create_agent_graph(model, checkpointer)
+        current_session_id = "default-session"
+        graph_config = {
+            "configurable": {"thread_id": current_session_id},
+            "recursion_limit": 10,
+        }
 
-    while True:
-        user_input = input("我：")
+        print("模型连接配置已加载。")
+        print("带 SQLite Checkpointer 的状态图已创建。")
+        print(f"会话数据库：{database_path}")
+        print(f"当前会话：{current_session_id}")
+        print("输入 /session 会话名 切换会话。")
+        print("输入 exit 结束对话。")
 
-        if user_input == "exit":
-            print("对话结束。")
-            break
+        while True:
+            user_input = input("我：")
 
-        if user_input == "/session":
-            print("请在 /session 后输入会话名，例如：/session xiaoming")
-            continue
+            if user_input == "exit":
+                print("对话结束。")
+                break
 
-        if user_input.startswith("/session "):
-            new_session_id = user_input.removeprefix("/session ").strip()
-            if not new_session_id:
-                print("会话名不能为空。")
+            if user_input == "/session":
+                print("请在 /session 后输入会话名，例如：/session xiaoming")
                 continue
 
-            current_session_id = new_session_id
-            graph_config["configurable"]["thread_id"] = current_session_id
-            print(f"已切换到会话：{current_session_id}")
-            continue
+            if user_input.startswith("/session "):
+                new_session_id = user_input.removeprefix("/session ").strip()
+                if not new_session_id:
+                    print("会话名不能为空。")
+                    continue
 
-        new_messages = [HumanMessage(content=user_input)]
-        saved_state = agent_graph.get_state(graph_config)
-        if not saved_state.values.get("messages"):
-            new_messages.insert(
-                0,
-                SystemMessage(
-                    content="你是一个乐于助人的 AI 助手。请使用简洁的中文回答。"
-                ),
-            )
+                current_session_id = new_session_id
+                graph_config["configurable"]["thread_id"] = current_session_id
+                print(f"已切换到会话：{current_session_id}")
+                continue
 
-        turn_state: AgentState = {
-            "messages": new_messages,
-        }
-        print("本轮用户消息已提交给会话。")
+            new_messages = [HumanMessage(content=user_input)]
+            saved_state = agent_graph.get_state(graph_config)
+            if not saved_state.values.get("messages"):
+                new_messages.insert(
+                    0,
+                    SystemMessage(
+                        content="你是一个乐于助人的 AI 助手。请使用简洁的中文回答。"
+                    ),
+                )
 
-        try:
-            result = agent_graph.invoke(
-                turn_state,
-                config=graph_config,
-            )
-            assistant_reply = (
-                result["messages"][-1].content or "模型未返回文本内容。"
-            )
-            print(f"Agent：{assistant_reply}")
-        except Exception as error:
-            print(f"本轮处理失败：{error}")
+            turn_state: AgentState = {
+                "messages": new_messages,
+            }
+            print("本轮用户消息已提交给会话。")
+
+            try:
+                result = agent_graph.invoke(
+                    turn_state,
+                    config=graph_config,
+                )
+                assistant_reply = (
+                    result["messages"][-1].content or "模型未返回文本内容。"
+                )
+                print(f"Agent：{assistant_reply}")
+            except Exception as error:
+                print(f"本轮处理失败：{error}")
 
 
 if __name__ == "__main__":
