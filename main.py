@@ -1,8 +1,9 @@
-"""Agent V5：在 Memory 与 RAG 基础上，通过 MCP 调用本地时间工具。
+"""Agent V5：自动发现 MCP 工具，保留 Memory 与 RAG。
 
-SQLite 会话与本地知识库保留；时间工具由 MCP Server 执行并返回结果。
+SQLite 会话与本地知识库保留；时间和计算器由 MCP Server 执行并返回结果。
 """
 
+import asyncio
 import os
 from pathlib import Path
 from typing import Annotated, Callable, TypedDict
@@ -17,7 +18,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 
-from mcp_client import get_current_time
+from mcp_client import load_mcp_tools
 from rag import create_retriever_tool
 
 
@@ -57,24 +58,8 @@ def load_config() -> bool:
     return True
 
 
-def calculator(left: float, operator: str, right: float) -> float:
-    """计算两个数字的加、减、乘、除。"""
-    if operator == "+":
-        return left + right
-    if operator == "-":
-        return left - right
-    if operator == "*":
-        return left * right
-    if operator == "/":
-        if right == 0:
-            raise ValueError("除数不能为 0。")
-        return left / right
-
-    raise ValueError(f"不支持的运算符：{operator}")
-
-
 def create_langgraph_model(tools: list) -> Runnable:
-    """创建已绑定本地工具的 LangGraph 聊天模型。"""
+    """创建已绑定 MCP 工具和本地 RAG 工具的聊天模型。"""
     model = ChatOpenAI(
         model=os.getenv("MODEL_NAME"),
         api_key=os.getenv("API_KEY"),
@@ -94,7 +79,7 @@ def create_agent_node(model: Runnable) -> Callable[[AgentState], dict]:
 
 
 def create_tool_node(tools: list) -> ToolNode:
-    """创建负责执行本地工具并返回执行结果的节点。"""
+    """创建负责执行已登记工具并返回执行结果的节点。"""
     return ToolNode(tools)
 
 
@@ -136,7 +121,8 @@ def main() -> None:
         return
 
     retriever_tool = create_retriever_tool()
-    tools = [calculator, get_current_time, retriever_tool]
+    mcp_tools = asyncio.run(load_mcp_tools())
+    tools = [*mcp_tools, retriever_tool]
     model = create_langgraph_model(tools)
     data_dir = Path(__file__).resolve().parent / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
