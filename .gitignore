@@ -1,0 +1,79 @@
+# 本机密钥和模型连接配置，绝不提交到 Git。
+.env
+
+# Python 自动生成的缓存文件。
+__pycache__/
+*.py[cod]
+
+# 当前项目的 Python 虚拟环境，可随时根据 requirements.txt 重建。
+.venv/
+
+# 本地会话数据库及 SQLite 自动生成的辅助文件。
+/data/memory.db
+/data/memory.db-wal
+/data/memory.db-shm
+/data/memory.db-journal
+
+# 本地向量模型下载缓存，可重新下载，不提交到 Git。
+/data/embedding_models/
+
+# V3 历史快照独立运行时生成的会话数据库。
+/versions/v3/data/memory.db
+/versions/v3/data/memory.db-wal
+/versions/v3/data/memory.db-shm
+/versions/v3/data/memory.db-journal
+
+# V4 历史快照独立运行时生成的会话数据库与模型缓存。
+/versions/v4/data/memory.db
+/versions/v4/data/memory.db-wal
+/versions/v4/data/memory.db-shm
+/versions/v4/data/memory.db-journal
+/versions/v4/data/embedding_models/
+
+# V5 历史快照独立运行时生成的会话数据库与模型缓存。
+/versions/v5/data/memory.db
+/versions/v5/data/memory.db-wal
+/versions/v5/data/memory.db-shm
+/versions/v5/data/memory.db-journal
+/versions/v5/data/embedding_models/
+
+# V5 自动发现版独立运行时生成的会话数据库与模型缓存。
+/versions/v5-auto/data/memory.db
+/versions/v5-auto/data/memory.db-wal
+/versions/v5-auto/data/memory.db-shm
+/versions/v5-auto/data/memory.db-journal
+/versions/v5-auto/data/embedding_models/
+
+# V6 历史快照独立运行时生成的会话数据库与模型缓存。
+/versions/v6/data/memory.db
+/versions/v6/data/memory.db-wal
+/versions/v6/data/memory.db-shm
+/versions/v6/data/memory.db-journal
+/versions/v6/data/embedding_models/
+
+# 每次运行评估生成的回答、检索片段和指标，仅供本机对比。
+/eval/results/
+
+# V7 历史快照运行时生成的数据和评估报告。
+/versions/v7/data/memory.db
+/versions/v7/data/memory.db-wal
+/versions/v7/data/memory.db-shm
+/versions/v7/data/memory.db-journal
+/versions/v7/data/embedding_models/
+/versions/v7/eval/results/
+
+# V8 历史快照独立运行时生成的数据和评估报告。
+/versions/v8/data/memory.db
+/versions/v8/data/memory.db-wal
+/versions/v8/data/memory.db-shm
+/versions/v8/data/memory.db-journal
+/versions/v8/data/embedding_models/
+/versions/v8/eval/results/
+
+# V9 网页版快照独立运行时生成的数据和评估报告。
+/versions/v9/data/memory.db
+/versions/v9/data/memory.db-wal
+/versions/v9/data/memory.db-shm
+/versions/v9/data/memory.db-journal
+/versions/v9/data/embedding_models/
+/versions/v9/eval/results/
