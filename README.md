@@ -1,23 +1,22 @@
-# Agent V1：Tool-Using Agent
+# Agent V2：LangGraph Agent
 
-这个版本在 V0 基础上加入了结构化 Tool Calling，并继续使用手写 Agent Loop。
+这个版本在 V1 的功能基础上，用 LangGraph 状态图替代手写的内部 Agent Loop。
 
 它已经具备：
 
-- `calculator` 计算工具。
-- `get_current_time` 本机时间工具。
-- 模型自主选择工具。
-- 同一回复中的多个工具调用。
-- 工具结果与 `tool_call_id` 对应。
-- 根据工具结果继续请求模型。
-- 每个用户问题最多请求模型 5 次。
-- 工具错误回传和最终自然语言回答。
+- 使用 `AgentState` 保存和合并对话消息。
+- 使用模型节点调用绑定工具后的聊天模型。
+- 使用 `ToolNode` 执行计算器和时间工具。
+- 根据模型是否产生 `tool_calls` 选择工具路线或结束路线。
+- 工具执行后自动回到模型节点生成最终回答。
+- 使用 `recursion_limit` 防止单轮图循环无限进行。
+- 在终端连续对话，并在本次程序运行期间保留上下文。
 
 在项目根目录运行：
 
 ```powershell
-pip install -r .\versions\v1\requirements.txt
-python .\versions\v1\main.py
+pip install -r .\versions\v2\requirements.txt
+python .\versions\v2\main.py
 ```
 
 简单测试：

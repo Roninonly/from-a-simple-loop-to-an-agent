@@ -1,15 +1,26 @@
-"""Agent V1：支持 Tool Calling 的手写 Agent Loop。
+"""Agent V2：使用 LangGraph 管理模型与工具之间的循环。
 
-本阶段不使用 Agent 框架，由 Python 代码负责执行模型请求的工具，
-再把工具结果放回 messages，直到模型生成最终回答。
+本阶段使用 StateGraph、模型节点、工具节点和条件路线，
+代替 V1 中手写的内部 Agent Loop。
 """
 
-import json
 import os
 from datetime import datetime
+from typing import Annotated, Callable, TypedDict
 
 from dotenv import load_dotenv
-from openai import OpenAI
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.runnables import Runnable
+from langchain_openai import ChatOpenAI
+from langgraph.graph import END, START, StateGraph
+from langgraph.graph.message import add_messages
+from langgraph.prebuilt import ToolNode
+
+
+class AgentState(TypedDict):
+    """LangGraph 中各个节点共同读取和更新的状态。"""
+
+    messages: Annotated[list, add_messages]
 
 
 def load_config() -> bool:
@@ -28,14 +39,6 @@ def load_config() -> bool:
         return False
 
     return True
-
-
-def create_llm_client() -> OpenAI:
-    """创建一个可连接 OpenAI-compatible 模型服务的客户端。"""
-    return OpenAI(
-        api_key=os.getenv("API_KEY"),
-        base_url=os.getenv("BASE_URL"),
-    )
 
 
 def calculator(left: float, operator: str, right: float) -> float:
@@ -59,125 +62,110 @@ def get_current_time() -> str:
     return datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
 
 
-TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "calculator",
-            "description": "计算两个数字的加、减、乘、除。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "left": {"type": "number", "description": "左边的数字。"},
-                    "operator": {
-                        "type": "string",
-                        "enum": ["+", "-", "*", "/"],
-                        "description": "要执行的运算符。",
-                    },
-                    "right": {"type": "number", "description": "右边的数字。"},
-                },
-                "required": ["left", "operator", "right"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_current_time",
-            "description": "获取运行本程序的电脑当前日期、时间和时区。",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-            },
-        },
-    },
-]
+LANGGRAPH_TOOLS = [calculator, get_current_time]
+
+
+def create_langgraph_model() -> Runnable:
+    """创建已绑定本地工具的 LangGraph 聊天模型。"""
+    model = ChatOpenAI(
+        model=os.getenv("MODEL_NAME"),
+        api_key=os.getenv("API_KEY"),
+        base_url=os.getenv("BASE_URL"),
+    )
+    return model.bind_tools(LANGGRAPH_TOOLS)
+
+
+def create_agent_node(model: Runnable) -> Callable[[AgentState], dict]:
+    """创建负责调用模型并更新消息状态的节点。"""
+
+    def agent_node(state: AgentState) -> dict:
+        response = model.invoke(state["messages"])
+        return {"messages": [response]}
+
+    return agent_node
+
+
+def create_tool_node() -> ToolNode:
+    """创建负责执行本地工具并返回执行结果的节点。"""
+    return ToolNode(LANGGRAPH_TOOLS)
+
+
+def route_after_agent(state: AgentState) -> str:
+    """根据模型是否请求工具，决定下一步路线。"""
+    last_message = state["messages"][-1]
+
+    if last_message.tool_calls:
+        return "tools"
+
+    return END
+
+
+def create_agent_graph(model: Runnable) -> Runnable:
+    """创建并编译模型节点与工具节点组成的状态图。"""
+    graph = StateGraph(AgentState)
+
+    graph.add_node("agent", create_agent_node(model))
+    graph.add_node("tools", create_tool_node())
+
+    graph.add_edge(START, "agent")
+    graph.add_conditional_edges(
+        "agent",
+        route_after_agent,
+        {"tools": "tools", END: END},
+    )
+    graph.add_edge("tools", "agent")
+
+    return graph.compile()
 
 
 def main() -> None:
     """程序入口。"""
-    print("Agent V1 项目已初始化。")
+    print("Agent V2 项目已初始化。")
 
-    if load_config():
-        client = create_llm_client()
-        messages = [
-            {
-                "role": "system",
-                "content": "你是一个乐于助人的 AI 助手。请使用简洁的中文回答。",
-            }
+    if not load_config():
+        return
+
+    model = create_langgraph_model()
+    agent_graph = create_agent_graph(model)
+    state: AgentState = {
+        "messages": [
+            SystemMessage(
+                content="你是一个乐于助人的 AI 助手。请使用简洁的中文回答。"
+            )
         ]
-        print("模型连接配置已加载。")
-        print("模型客户端已创建。")
-        print("对话历史已初始化。")
-        print("输入 exit 结束对话。")
+    }
 
-        while True:
-            user_input = input("我：")
+    print("模型连接配置已加载。")
+    print("LangGraph 状态图已创建。")
+    print("对话状态已初始化。")
+    print("输入 exit 结束对话。")
 
-            if user_input == "exit":
-                print("对话结束。")
-                break
+    while True:
+        user_input = input("我：")
 
-            messages.append({"role": "user", "content": user_input})
-            print("用户消息已加入对话历史。")
+        if user_input == "exit":
+            print("对话结束。")
+            break
 
-            try:
-                model_call_count = 0
-                # 围绕当前用户问题继续处理工具请求，最多请求模型 5 次。
-                while model_call_count < 5:
-                    model_call_count += 1
-                    response = client.chat.completions.create(
-                        model=os.getenv("MODEL_NAME"),
-                        messages=messages,
-                        tools=TOOLS,
-                    )
-                    assistant_message = response.choices[0].message
-                    tool_calls = assistant_message.tool_calls or []
+        turn_state: AgentState = {
+            "messages": [
+                *state["messages"],
+                HumanMessage(content=user_input),
+            ]
+        }
+        print("用户消息已加入对话状态。")
 
-                    if not tool_calls:
-                        assistant_reply = assistant_message.content or "模型未返回文本内容。"
-                        messages.append({"role": "assistant", "content": assistant_reply})
-                        print(f"Agent：{assistant_reply}")
-                        break
-
-                    # 一条模型消息可以包含多个工具请求，只保存一次。
-                    messages.append(assistant_message)
-                    for tool_call in tool_calls:
-                        print(f"模型请求调用工具：{tool_call.function.name}")
-                        print(f"模型传入参数：{tool_call.function.arguments}")
-
-                        try:
-                            tool_arguments = json.loads(tool_call.function.arguments)
-                            if tool_call.function.name == "calculator":
-                                tool_result = calculator(
-                                    left=tool_arguments["left"],
-                                    operator=tool_arguments["operator"],
-                                    right=tool_arguments["right"],
-                                )
-                            elif tool_call.function.name == "get_current_time":
-                                tool_result = get_current_time()
-                            else:
-                                raise ValueError("当前程序暂不支持执行这个工具。")
-
-                            print(f"本地工具执行结果：{tool_result}")
-                        except (ValueError, KeyError, TypeError) as error:
-                            tool_result = f"工具执行失败：{error}"
-                            print(tool_result)
-
-                        # 成功或失败，都把结果与本次请求编号对应起来。
-                        messages.append(
-                            {
-                                "role": "tool",
-                                "tool_call_id": tool_call.id,
-                                "content": str(tool_result),
-                            }
-                        )
-                    print("工具结果已加入对话历史。")
-
-                if model_call_count == 5 and tool_calls:
-                    print("本轮已达到 5 次模型请求上限，暂未获得最终回答。请简化问题后重试。")
-            except Exception as error:
-                print(f"本轮处理失败：{error}")
+        try:
+            state = agent_graph.invoke(
+                turn_state,
+                config={"recursion_limit": 10},
+            )
+            assistant_reply = (
+                state["messages"][-1].content or "模型未返回文本内容。"
+            )
+            print(f"Agent：{assistant_reply}")
+        except Exception as error:
+            print(f"本轮处理失败：{error}")
 
 
 if __name__ == "__main__":
